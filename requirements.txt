@@ -1,0 +1,5 @@
+rumps==0.4.0
+requests==2.31.0
+pyobjc==10.1
+aw-client==0.5.13
+aw-core==0.5.16
