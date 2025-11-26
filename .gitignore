@@ -59,3 +59,12 @@ icon.iconset/
 *.swp
 *.swo
 *~
+
+# Claude Code
+CLAUDE.md
+
+# Temp files
+idea.txt
+create_icon.py
+venv/
+.venv/
