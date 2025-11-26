@@ -409,6 +409,22 @@ class BitrixWorkdayTracker(rumps.App):
                 rumps.alert("Ошибка", "Не удалось получить статус из Bitrix24")
                 return
 
+            # Проверяем, не закрыт ли день уже
+            current_status = status.get('STATUS')
+            if current_status == 'CLOSED':
+                rumps.alert("День уже завершен", "Рабочий день уже был завершен в Bitrix24")
+
+                # Сбрасываем локальное состояние
+                self.is_running = False
+                self.is_paused = False
+                self.start_time = None
+                self.time_leaks_seconds = 0
+                self.pause_start_time = None
+
+                # Обновляем меню
+                self.update_menu_for_stopped_workday()
+                return
+
             # Закрываем день в Bitrix24
             response = requests.post(
                 f"{self.webhook_url}timeman.close",
@@ -439,6 +455,19 @@ class BitrixWorkdayTracker(rumps.App):
                 )
 
                 # Сбрасываем все переменные состояния
+                self.start_time = None
+                self.time_leaks_seconds = 0
+                self.pause_start_time = None
+
+                # Обновляем меню
+                self.update_menu_for_stopped_workday()
+            elif response.status_code == 400:
+                # Ошибка 400 обычно означает, что день уже закрыт
+                rumps.alert("День уже завершен", "Рабочий день уже был завершен в Bitrix24")
+
+                # Сбрасываем локальное состояние
+                self.is_running = False
+                self.is_paused = False
                 self.start_time = None
                 self.time_leaks_seconds = 0
                 self.pause_start_time = None
