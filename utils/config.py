@@ -3,6 +3,9 @@
 
 import json
 import os
+from utils.logger import get_logger
+
+logger = get_logger('config')
 
 
 def load_config():
@@ -17,18 +20,18 @@ def load_config():
         with open(config_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"⚠️ Файл конфигурации не найден: {config_path}")
-        print("ℹ️  Используются настройки по умолчанию")
+        logger.warning(f"Файл конфигурации не найден: {config_path}")
+        logger.info("Используются настройки по умолчанию")
         return {}
     except json.JSONDecodeError as e:
-        print(f"❌ Ошибка парсинга JSON в {config_path}: {e}")
-        print("ℹ️  Проверьте корректность файла конфигурации")
+        logger.error(f"Ошибка парсинга JSON в {config_path}: {e}")
+        logger.info("Проверьте корректность файла конфигурации")
         return {}
     except PermissionError:
-        print(f"❌ Нет прав для чтения файла: {config_path}")
+        logger.error(f"Нет прав для чтения файла: {config_path}")
         return {}
     except Exception as e:
-        print(f"❌ Неожиданная ошибка при загрузке конфига: {e}")
+        logger.exception(f"Неожиданная ошибка при загрузке конфига: {e}")
         return {}
 
 

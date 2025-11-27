@@ -6,6 +6,9 @@ import objc
 from Foundation import NSObject, NSMakeRect
 import rumps
 from utils.config import save_config
+from utils.logger import get_logger
+
+logger = get_logger('settings_window')
 
 
 class SettingsWindow(NSObject):
@@ -280,20 +283,20 @@ class SettingsWindow(NSObject):
             if 'enabled' in self.config.get('pomodoro', {}):
                 new_config['pomodoro']['enabled'] = self.config['pomodoro']['enabled']
 
-            print(f"💾 Сохраняю конфиг: {new_config}")
+            logger.info(f"Сохраняю конфиг: {new_config}")
 
             # Сохраняем в файл
             save_config(new_config)
-            print("✅ Сохранено в файл")
+            logger.info("Сохранено в файл")
 
             # Сохраняем в БД напрямую
             try:
                 from core.database import Database
                 with Database() as db:
                     db.save_settings(new_config)
-                print("✅ Сохранено в БД")
+                logger.info("Сохранено в БД")
             except Exception as e:
-                print(f"⚠️ Не удалось сохранить в БД: {e}")
+                logger.warning(f"Не удалось сохранить в БД: {e}")
 
             # Закрываем окно
             self.window.close()
@@ -302,7 +305,7 @@ class SettingsWindow(NSObject):
             rumps.notification("Настройки", "Сохранено", "Настройки успешно сохранены")
 
         except ValueError as e:
-            print(f"❌ Ошибка валидации: {e}")
+            logger.error(f"Ошибка валидации: {e}")
             # Показываем ошибку
             alert = AppKit.NSAlert.alloc().init()
             alert.setMessageText_("Ошибка")
@@ -311,9 +314,7 @@ class SettingsWindow(NSObject):
             alert.addButtonWithTitle_("OK")
             alert.runModal()
         except Exception as e:
-            print(f"❌ Неожиданная ошибка при сохранении: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Неожиданная ошибка при сохранении: {e}")
 
     @objc.signature(b'v@:@')
     def cancel_(self, sender):
@@ -323,7 +324,7 @@ class SettingsWindow(NSObject):
     @objc.signature(b'v@:@')
     def windowWillClose_(self, notification):
         """Callback когда окно закрывается - очищаем ресурсы"""
-        print("🧹 Очистка окна настроек...")
+        logger.debug("Очистка окна настроек...")
 
         # Обнуляем делегата чтобы не было retain cycle
         if self.window:
@@ -335,4 +336,4 @@ class SettingsWindow(NSObject):
         # Очищаем ссылку на окно
         self.window = None
 
-        print("✅ Окно настроек очищено")
+        logger.debug("Окно настроек очищено")

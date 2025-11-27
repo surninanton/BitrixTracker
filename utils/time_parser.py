@@ -3,6 +3,9 @@
 
 from datetime import datetime
 from dateutil import parser
+from utils.logger import get_logger
+
+logger = get_logger('time_parser')
 
 
 def parse_bitrix_time(time_str):
@@ -35,25 +38,25 @@ def parse_time_leaks(time_leaks_str):
     try:
         parts = time_leaks_str.split(':')
         if len(parts) != 3:
-            print(f"⚠️ Неверный формат time_leaks: {time_leaks_str} (ожидается ЧЧ:ММ:СС)")
+            logger.warning(f"Неверный формат time_leaks: {time_leaks_str} (ожидается ЧЧ:ММ:СС)")
             return 0
 
         hours, minutes, seconds = map(int, parts)
 
         # Валидация
         if hours < 0 or minutes < 0 or seconds < 0:
-            print(f"⚠️ Отрицательные значения в time_leaks: {time_leaks_str}")
+            logger.warning(f"Отрицательные значения в time_leaks: {time_leaks_str}")
             return 0
 
         if minutes >= 60 or seconds >= 60:
-            print(f"⚠️ Недопустимые значения минут/секунд: {time_leaks_str}")
+            logger.warning(f"Недопустимые значения минут/секунд: {time_leaks_str}")
             return 0
 
         return hours * 3600 + minutes * 60 + seconds
 
     except ValueError as e:
-        print(f"⚠️ Не удалось распарсить time_leaks '{time_leaks_str}': {e}")
+        logger.warning(f"Не удалось распарсить time_leaks '{time_leaks_str}': {e}")
         return 0
     except Exception as e:
-        print(f"❌ Неожиданная ошибка при парсинге time_leaks '{time_leaks_str}': {e}")
+        logger.exception(f"Неожиданная ошибка при парсинге time_leaks '{time_leaks_str}': {e}")
         return 0
