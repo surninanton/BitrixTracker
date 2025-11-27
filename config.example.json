@@ -1,0 +1,12 @@
+{
+  "webhook_url": "https://your-bitrix24-domain.ru/rest/USER_ID/YOUR_WEBHOOK/",
+  "check_interval": 5,
+  "pomodoro": {
+    "enabled": false,
+    "work_duration": 25,
+    "short_break": 5,
+    "long_break": 15,
+    "pomodoros_until_long_break": 4,
+    "auto_pause_bitrix": true
+  }
+}
