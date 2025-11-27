@@ -15,18 +15,25 @@ class PomodoroState(Enum):
 class PomodoroTimer:
     """Таймер Pomodoro"""
 
-    def __init__(self, config, on_state_change=None, on_break_start=None, on_break_end=None):
+    def __init__(self, config, on_state_change=None, on_break_start=None, on_break_end=None,
+                 on_work_start=None, on_session_complete=None, on_session_skip=None):
         """
         Args:
             config: словарь с настройками pomodoro
             on_state_change: callback при смене состояния (state, remaining_seconds)
             on_break_start: callback при начале перерыва
             on_break_end: callback при окончании перерыва
+            on_work_start: callback при начале рабочей сессии
+            on_session_complete: callback при завершении сессии (state)
+            on_session_skip: callback при пропуске сессии (state)
         """
         self.config = config
         self.on_state_change = on_state_change
         self.on_break_start = on_break_start
         self.on_break_end = on_break_end
+        self.on_work_start = on_work_start
+        self.on_session_complete = on_session_complete
+        self.on_session_skip = on_session_skip
 
         self.state = PomodoroState.STOPPED
         self.remaining_seconds = 0
@@ -38,6 +45,11 @@ class PomodoroTimer:
         self.state = PomodoroState.WORK
         self.remaining_seconds = self.config.get('work_duration', 25) * 60
         self.is_running = True
+
+        # Вызываем callback начала рабочей сессии
+        if self.on_work_start:
+            self.on_work_start()
+
         if self.on_state_change:
             self.on_state_change(self.state, self.remaining_seconds)
 
@@ -52,6 +64,12 @@ class PomodoroTimer:
 
     def skip(self):
         """Пропустить текущую сессию"""
+        current_state = self.state
+
+        # Вызываем callback пропуска сессии
+        if self.on_session_skip:
+            self.on_session_skip(current_state)
+
         if self.state == PomodoroState.WORK:
             # Переходим к перерыву
             self._start_break()
@@ -71,9 +89,19 @@ class PomodoroTimer:
             if self.state == PomodoroState.WORK:
                 # Рабочая сессия завершена
                 self.pomodoro_count += 1
+
+                # Вызываем callback завершения сессии
+                if self.on_session_complete:
+                    self.on_session_complete(self.state)
+
                 self._start_break()
             elif self.state in [PomodoroState.SHORT_BREAK, PomodoroState.LONG_BREAK]:
                 # Перерыв завершен
+
+                # Вызываем callback завершения сессии
+                if self.on_session_complete:
+                    self.on_session_complete(self.state)
+
                 self._end_break()
 
         if self.on_state_change:

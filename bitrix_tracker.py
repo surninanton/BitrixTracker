@@ -10,8 +10,10 @@ from core.pomodoro import PomodoroTimer, PomodoroState
 from core.bitrix_client import BitrixClient
 from core.activity_watch import ActivityWatchService
 from core.workday import WorkdayManager
+from core.database import Database
 from ui.menu import MenuManager
 from ui.statistics import StatisticsManager
+from ui.settings_window import SettingsWindow
 from utils.config import load_config, save_config
 from utils.time_parser import parse_time_leaks
 
@@ -31,11 +33,15 @@ class BitrixWorkdayTracker(rumps.App):
         webhook_url = self.config.get('webhook_url', '')
 
         # Инициализируем сервисы
+        self.db = Database()  # База данных для статистики
         self.bitrix = BitrixClient(webhook_url)
         self.activity_watch = ActivityWatchService()
-        self.workday = WorkdayManager(self.bitrix)
+        self.workday = WorkdayManager(self.bitrix, on_workday_start=self.on_workday_start)
         self.menu_manager = MenuManager(self)
         self.statistics = StatisticsManager(self.activity_watch, self.bitrix)
+
+        # ID текущей помодоро сессии в БД
+        self.current_pomodoro_session_id = None
 
         # Pomodoro
         pomodoro_config = self.config.get('pomodoro', {
@@ -50,9 +56,13 @@ class BitrixWorkdayTracker(rumps.App):
             config=pomodoro_config,
             on_state_change=self.on_pomodoro_state_change,
             on_break_start=self.on_pomodoro_break_start,
-            on_break_end=self.on_pomodoro_break_end
+            on_break_end=self.on_pomodoro_break_end,
+            on_work_start=self.on_pomodoro_work_start,
+            on_session_complete=self.on_pomodoro_session_complete,
+            on_session_skip=self.on_pomodoro_session_skip
         )
-        self.pomodoro_enabled = pomodoro_config.get('enabled', False)
+        # При старте помодоро всегда выключен, независимо от конфига
+        self.pomodoro_enabled = False
 
         # Таймер
         self.timer = rumps.Timer(self.update_timer, 1)
@@ -144,6 +154,39 @@ class BitrixWorkdayTracker(rumps.App):
         """Показать статистику за сегодня"""
         self.statistics.show_day_stats()
 
+    # === Integration callbacks ===
+
+    def on_workday_start(self):
+        """Callback при успешном начале рабочего дня"""
+        # Проверяем настройку автозапуска помодоро
+        start_pomodoro = self.config.get('pomodoro', {}).get('start_pomodoro_with_workday', False)
+
+        if start_pomodoro and not self.pomodoro_enabled:
+            self.pomodoro_enabled = True
+            self.pomodoro.start()
+            rumps.notification("Помодоро", "Автозапуск", f"Помодоро запущен вместе с рабочим днем")
+
+    def on_pomodoro_work_start(self):
+        """Callback при начале рабочей сессии помодоро"""
+        # Начинаем новую сессию в БД
+        session_type = 'work'
+        planned_duration = self.config.get('pomodoro', {}).get('work_duration', 25) * 60
+        self.current_pomodoro_session_id = self.db.start_pomodoro_session(session_type, planned_duration)
+        print(f"🍅 Начата рабочая сессия помодоро (ID: {self.current_pomodoro_session_id})")
+
+        # Проверяем настройку автозапуска рабочего дня
+        start_workday = self.config.get('pomodoro', {}).get('start_workday_with_pomodoro', False)
+
+        if start_workday:
+            if not self.workday.is_running:
+                # Рабочий день не запущен - запускаем
+                self.start_workday(None)
+                rumps.notification("Bitrix24", "Автозапуск", "Рабочий день начат вместе с помодоро")
+            elif self.workday.is_paused:
+                # Рабочий день на паузе - возобновляем
+                self.resume_workday(None)
+                rumps.notification("Bitrix24", "Автовозобновление", "Рабочий день возобновлен вместе с помодоро")
+
     # === Pomodoro callbacks ===
 
     def on_pomodoro_state_change(self, state, remaining_seconds):
@@ -152,9 +195,28 @@ class BitrixWorkdayTracker(rumps.App):
 
     def on_pomodoro_break_start(self, break_state):
         """Callback при начале перерыва"""
-        auto_pause = self.config.get('pomodoro', {}).get('auto_pause_bitrix', True)
+        # Начинаем сессию перерыва в БД
+        if break_state == PomodoroState.SHORT_BREAK:
+            session_type = 'short_break'
+            planned_duration = self.config.get('pomodoro', {}).get('short_break', 5) * 60
+        else:  # LONG_BREAK
+            session_type = 'long_break'
+            planned_duration = self.config.get('pomodoro', {}).get('long_break', 15) * 60
 
-        if auto_pause and self.workday.is_running and not self.workday.is_paused:
+        self.current_pomodoro_session_id = self.db.start_pomodoro_session(session_type, planned_duration)
+        print(f"☕ Начат перерыв помодоро (ID: {self.current_pomodoro_session_id}, тип: {session_type})")
+
+        # Проверяем режим автопаузы
+        pause_mode = self.config.get('pomodoro', {}).get('bitrix_pause_mode', 'all_breaks')
+        should_pause = False
+
+        if pause_mode == 'all_breaks':
+            should_pause = True
+        elif pause_mode == 'long_breaks_only':
+            should_pause = (break_state == PomodoroState.LONG_BREAK)
+        # если 'never', то should_pause остается False
+
+        if should_pause and self.workday.is_running and not self.workday.is_paused:
             try:
                 if self.bitrix.pause_workday():
                     status_after = self.bitrix.get_status()
@@ -201,6 +263,22 @@ class BitrixWorkdayTracker(rumps.App):
         # Уведомление
         rumps.notification("Помодоро", "Перерыв окончен", f"Возвращаемся к работе! 🍅 {self.pomodoro.config.get('work_duration', 25)} мин")
 
+    def on_pomodoro_session_complete(self, state):
+        """Callback при завершении помодоро сессии"""
+        # Закрываем сессию в БД (completed=True)
+        if self.current_pomodoro_session_id:
+            self.db.end_pomodoro_session(self.current_pomodoro_session_id, completed=True, skipped=False)
+            print(f"✅ Сессия помодоро завершена (ID: {self.current_pomodoro_session_id}, тип: {state.value})")
+            self.current_pomodoro_session_id = None
+
+    def on_pomodoro_session_skip(self, state):
+        """Callback при пропуске помодоро сессии"""
+        # Закрываем сессию в БД (skipped=True)
+        if self.current_pomodoro_session_id:
+            self.db.end_pomodoro_session(self.current_pomodoro_session_id, completed=False, skipped=True)
+            print(f"⏭ Сессия помодоро пропущена (ID: {self.current_pomodoro_session_id}, тип: {state.value})")
+            self.current_pomodoro_session_id = None
+
     # === Pomodoro controls ===
 
     def toggle_pomodoro(self, sender):
@@ -209,12 +287,19 @@ class BitrixWorkdayTracker(rumps.App):
 
         if self.pomodoro_enabled:
             self.pomodoro.start()
-            sender.title = "🍅 Помодоро: Выкл"
-            rumps.notification("Помодоро", "Помодоро включен", f"Рабочая сессия: {self.pomodoro.config.get('work_duration', 25)} мин")
+            rumps.notification("Помодоро", "Помодоро запущен", f"Рабочая сессия: {self.pomodoro.config.get('work_duration', 25)} мин")
         else:
             self.pomodoro.stop()
-            sender.title = "🍅 Помодоро: Вкл"
-            rumps.notification("Помодоро", "Помодоро выключен", "Таймер остановлен")
+            rumps.notification("Помодоро", "Помодоро остановлен", "Таймер остановлен")
+
+        # Обновляем меню для корректного отображения состояния кнопки
+        if self.workday.is_running:
+            if self.workday.is_paused:
+                self.menu_manager.update_for_paused_workday()
+            else:
+                self.menu_manager.update_for_running_workday()
+        else:
+            self.menu_manager.update_for_stopped_workday()
 
         if 'pomodoro' not in self.config:
             self.config['pomodoro'] = {}
@@ -232,22 +317,30 @@ class BitrixWorkdayTracker(rumps.App):
     # === Settings ===
 
     def settings(self, _):
-        """Настройки"""
-        window = rumps.Window(
-            message='Введите Bitrix24 webhook URL:',
-            title='Настройки',
-            default_text=self.bitrix.webhook_url,
-            ok='Сохранить',
-            cancel='Отмена',
-            dimensions=(500, 24)
-        )
+        """Открыть окно настроек"""
+        # Перезагружаем конфиг перед открытием окна
+        self.config = load_config()
 
-        response = window.run()
-        if response.clicked:
-            self.bitrix.webhook_url = response.text
-            self.config['webhook_url'] = response.text
-            save_config(self.config)
-            rumps.alert("Настройки", "Webhook URL сохранен")
+        # Создаем и показываем окно
+        print(f"🪟 Открываю окно настроек с текущим конфигом: {self.config}")
+        settings_win = SettingsWindow.alloc().initWithConfig_(self.config)
+
+        # Сохраняем ссылку чтобы окно не уничтожилось сборщиком мусора
+        self.current_settings_window = settings_win
+        settings_win.show()
+
+        # Создаем таймер для проверки закрытия окна и обновления конфига
+        def check_settings_closed(_):
+            # Перезагружаем конфиг после закрытия окна
+            self.config = load_config()
+            if hasattr(self, 'bitrix'):
+                self.bitrix.webhook_url = self.config.get('webhook_url', '')
+            if hasattr(self, 'pomodoro'):
+                self.pomodoro.config = self.config.get('pomodoro', {})
+            print("✅ Конфигурация обновлена в приложении")
+
+        # Запускаем проверку через 1 секунду после закрытия
+        rumps.Timer(check_settings_closed, 1).start()
 
     def open_activitywatch(self, _):
         """Открыть веб-интерфейс ActivityWatch"""

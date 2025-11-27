@@ -9,10 +9,11 @@ from utils.time_parser import parse_bitrix_time, parse_time_leaks
 class WorkdayManager:
     """Управление рабочим днем"""
 
-    def __init__(self, bitrix):
+    def __init__(self, bitrix, on_workday_start=None):
         """
         Args:
             bitrix: экземпляр BitrixClient
+            on_workday_start: callback при успешном начале рабочего дня
         """
         self.bitrix = bitrix
         self.start_time = None
@@ -20,6 +21,7 @@ class WorkdayManager:
         self.is_paused = False
         self.time_leaks_seconds = 0
         self.pause_start_time = None
+        self.on_workday_start = on_workday_start
 
     def start(self, on_sync_paused=None, on_sync_running=None, on_new_day=None):
         """
@@ -64,13 +66,17 @@ class WorkdayManager:
                         rumps.notification("Bitrix24 Tracker", "Синхронизация", "Рабочий день на паузе")
                         if on_sync_paused:
                             on_sync_paused()
-                        return True
                     else:
                         self.is_paused = False
                         rumps.notification("Bitrix24 Tracker", "Синхронизация", "Рабочий день продолжается")
                         if on_sync_running:
                             on_sync_running()
-                        return True
+
+                    # Вызываем callback при синхронизации с существующим днем
+                    if self.on_workday_start:
+                        self.on_workday_start()
+
+                    return True
             else:
                 should_open_new_day = True
 
@@ -91,6 +97,11 @@ class WorkdayManager:
                     self.is_paused = False
 
                     rumps.notification("Bitrix24 Tracker", "Рабочий день начат", "ActivityWatch собирает статистику")
+
+                    # Вызываем callback при успешном начале рабочего дня
+                    if self.on_workday_start:
+                        self.on_workday_start()
+
                     if on_new_day:
                         on_new_day()
                     return True
