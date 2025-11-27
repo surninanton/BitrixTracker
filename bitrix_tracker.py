@@ -829,18 +829,21 @@ class BitrixWorkdayTracker(rumps.App):
                     f"{self.webhook_url}timeman.pause",
                     timeout=10
                 )
-                if response.status_code == 200:
-                    self.is_paused = True
-                    self.pause_start_time = datetime.now()
 
-                    # Получаем TIME_LEAKS
-                    status = self.get_timeman_status()
-                    if status:
-                        time_leaks_str = status.get('TIME_LEAKS', '00:00:00')
+                if response.status_code == 200:
+                    # Проверяем статус ПОСЛЕ вызова
+                    status_after = self.get_timeman_status()
+
+                    if status_after and status_after.get('STATUS') == 'PAUSED':
+                        self.is_paused = True
+                        self.pause_start_time = datetime.now()
+
+                        # Получаем TIME_LEAKS
+                        time_leaks_str = status_after.get('TIME_LEAKS', '00:00:00')
                         self.time_leaks_seconds = self.parse_time_leaks(time_leaks_str)
 
-                    # Обновляем меню
-                    self.update_menu_for_paused_workday()
+                        # Обновляем меню
+                        self.update_menu_for_paused_workday()
             except Exception as e:
                 print(f"Ошибка автопаузы Б24: {e}")
 
@@ -863,24 +866,37 @@ class BitrixWorkdayTracker(rumps.App):
         # Автопродолжение работы в Bitrix24
         auto_pause = self.config.get('pomodoro', {}).get('auto_pause_bitrix', True)
 
-        if auto_pause and self.is_paused:
+        if auto_pause and self.is_running and self.is_paused:
+            # Проверяем статус в Б24
+            status = self.get_timeman_status()
+
             try:
+                # ВАЖНО: timeman.pause работает как toggle ТОЛЬКО если TIME_FINISH не установлен
+                # Если TIME_FINISH установлен (день "закрыт" для паузы) - нужен timeman.open
+                if status and status.get('TIME_FINISH'):
+                    api_method = "timeman.open"
+                else:
+                    api_method = "timeman.pause"
+
                 response = requests.post(
-                    f"{self.webhook_url}timeman.pause",
+                    f"{self.webhook_url}{api_method}",
                     timeout=10
                 )
-                if response.status_code == 200:
-                    self.is_paused = False
-                    self.pause_start_time = None
 
-                    # Обновляем TIME_LEAKS
-                    status = self.get_timeman_status()
-                    if status:
-                        time_leaks_str = status.get('TIME_LEAKS', '00:00:00')
+                if response.status_code == 200:
+                    # Проверяем результат
+                    new_status = self.get_timeman_status()
+
+                    if new_status and new_status.get('STATUS') == 'OPENED':
+                        self.is_paused = False
+                        self.pause_start_time = None
+
+                        # Обновляем TIME_LEAKS
+                        time_leaks_str = new_status.get('TIME_LEAKS', '00:00:00')
                         self.time_leaks_seconds = self.parse_time_leaks(time_leaks_str)
 
-                    # Обновляем меню
-                    self.update_menu_for_running_workday()
+                        # Обновляем меню
+                        self.update_menu_for_running_workday()
             except Exception as e:
                 print(f"Ошибка автопродолжения Б24: {e}")
 
