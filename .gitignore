@@ -68,3 +68,5 @@ idea.txt
 create_icon.py
 venv/
 .venv/
+
+*.db

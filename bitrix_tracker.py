@@ -43,6 +43,9 @@ class BitrixWorkdayTracker(rumps.App):
         # ID текущей помодоро сессии в БД
         self.current_pomodoro_session_id = None
 
+        # Таймер для проверки настроек
+        self.check_settings_timer = None
+
         # Pomodoro
         pomodoro_config = self.config.get('pomodoro', {
             'enabled': False,
@@ -339,8 +342,13 @@ class BitrixWorkdayTracker(rumps.App):
                 self.pomodoro.config = self.config.get('pomodoro', {})
             print("✅ Конфигурация обновлена в приложении")
 
-        # Запускаем проверку через 1 секунду после закрытия
-        rumps.Timer(check_settings_closed, 1).start()
+        # Останавливаем предыдущий таймер если он есть
+        if self.check_settings_timer:
+            self.check_settings_timer.stop()
+
+        # Запускаем новый таймер
+        self.check_settings_timer = rumps.Timer(check_settings_closed, 1)
+        self.check_settings_timer.start()
 
     def open_activitywatch(self, _):
         """Открыть веб-интерфейс ActivityWatch"""
@@ -348,18 +356,33 @@ class BitrixWorkdayTracker(rumps.App):
         webbrowser.open('http://localhost:5600')
 
     def quit_app(self, _):
-        """Выход"""
-        if self.workday.is_running:
-            response = rumps.alert(
-                "Рабочий день активен",
-                "Завершить день и выйти?",
-                ok="Да",
-                cancel="Отмена"
-            )
-            if response == 1:
-                self.stop_workday(None)
-                rumps.quit_application()
-        else:
+        """Выход с правильной очисткой ресурсов"""
+        try:
+            if self.workday.is_running:
+                response = rumps.alert(
+                    "Рабочий день активен",
+                    "Завершить день и выйти?",
+                    ok="Да",
+                    cancel="Отмена"
+                )
+                if response == 1:
+                    self.stop_workday(None)
+                else:
+                    return  # Отменили выход
+
+            # Очищаем ресурсы
+            if hasattr(self, 'timer') and self.timer:
+                self.timer.stop()
+
+            if hasattr(self, 'check_settings_timer') and self.check_settings_timer:
+                self.check_settings_timer.stop()
+
+            if hasattr(self, 'db') and self.db:
+                self.db.close()
+
+            rumps.quit_application()
+        except Exception as e:
+            print(f"❌ Ошибка при выходе: {e}")
             rumps.quit_application()
 
 
