@@ -7,6 +7,8 @@
     "short_break": 5,
     "long_break": 15,
     "pomodoros_until_long_break": 4,
-    "auto_pause_bitrix": true
+    "start_pomodoro_with_workday": false,
+    "start_workday_with_pomodoro": false,
+    "bitrix_pause_mode": "all_breaks"
   }
 }
